@@ -169,7 +169,7 @@ python calc_metrics.py --metrics=fid50k_full,kid50k_full \
 
 ---
 
-## 4. Analysis — "our way"
+## 4. Analysis
 
 Diagnostics run on the trained snapshot pkls. **Most take no arguments and run from the repo root**; the run paths to analyze are hardcoded near the top of each script (`RUNS` / `RUN_MAP` / `RUN_*`), so check/edit them to match your run names once.
 
