@@ -1,0 +1,78 @@
+g++
+gcc
+
+data
+data/*
+!data/.placeholder
+
+training-runs
+training-runs/*
+out/*
+sample_sheets/*
+
+# local staging for parquet -> zip conversion (not source code)
+data_staging_imagenet100/
+imagenet_hf/
+pretrained/
+
+# unrelated helper scripts that don't belong in the soft-freeze fork
+export_cifar10_hf.py
+parquet_to_stylegan_zip.py
+
+
+*.zip
+
+# extracted few-shot dataset (images, not source)
+fastgan_few_shot_dir/
+
+# scratch backups
+*.bak
+
+**/__pycache__
+__pycache__
+.ipynb_checkpoints/
+tags
+*.swp
+*.pth
+*.pt
+*.npz
+*.tar
+*.gz
+*.pkl
+*.mp4
+*.pyc
+
+# ------- analysis outputs (exclude result tables/figures) -------
+# large cached numerics
+dnnlib/gan-metrics/
+counterfactual_runs/
+
+# aborted / scratch run dirs
+*.aborted_*
+
+# logs
+*.log
+*.out
+auto_followup.log
+
+# numeric result tables
+analysis_results.json
+pokemon_drift_results.json
+lpips_counterfactual_*.json
+drift_underfit_vs_converged.md
+
+# figures
+fft_*.png
+fft_*.pdf
+feature_maps_*.png
+feature_maps*.png
+counterfactual_*.png
+counterfactual_*.pdf
+
+# shell wrappers — README documents `python train.py` directly instead
+*.sh
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
