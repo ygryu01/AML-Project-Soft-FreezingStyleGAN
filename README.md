@@ -348,7 +348,7 @@ dnnlib/ torch_utils/ pg_modules/ metrics/ training/   upstream StyleGAN-XL core 
 
 This repository forks [StyleGAN-XL](https://github.com/autonomousvision/stylegan_xl) and extends it for a study of super-res freeze policies. The core model/training code belongs to the original authors and builds on the [StyleGAN3](https://github.com/NVlabs/stylegan3) and [Projected GANs](https://github.com/autonomousvision/projected_gan) codebases.
 
-Licensed under the original [LICENSE.txt](LICENSE.txt) (NVIDIA Source Code License).
+Licensed under the original [LICENSE.txt](LICENSE.txt) (This repository is licensed under the MIT License included in LICENSE.txt.).
 
 Cite the original paper:
 ```bibtex
