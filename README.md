@@ -61,26 +61,112 @@ The StyleGAN3-family custom CUDA kernels (`bias_act`, `upfirdn2d`, `filtered_lre
 - on build failure, see the StyleGAN3 [troubleshooting docs](https://github.com/NVlabs/stylegan3/blob/main/docs/troubleshooting.md) and [stylegan_xl#23](https://github.com/autonomousvision/stylegan_xl/issues/23).
 
 ### Datasets & pretrained stems
-Runners assume this layout:
 
-```
-data/          imagenet100_{16,32,64,128,256}.zip, pokemon128.zip, cifar10_{16,32}.zip
-pretrained/    imagenet{16,32,64,128}.pkl   (paper's official ImageNet-1k 1000-class stems)
-training-runs/ all training output (created automatically)
+Datasets are not redistributed by this repository. Download each source under its own license and convert it to the uncompressed ZIP format expected by StyleGAN-XL. A complete setup has this layout:
+
+```text
+data/
+  imagenet100_{16,32,64,128}.zip  # 129,597 ImageNet-100 training images
+  imagenet100_256.zip             # ~5,000 validation images used by the 256 stage
+  pokemon{16,32,64,128}.zip
+  cifar10_{16,32}.zip
+pretrained/
+  imagenet{16,32,64,128}.pkl      # official 1000-class StyleGAN-XL stems
+training-runs/                     # created by train.py
 ```
 
-Building dataset zips:
+#### ImageNet-100 from Hugging Face
+
+This project starts from the gated [ILSVRC/imagenet-1k](https://huggingface.co/datasets/ILSVRC/imagenet-1k) dataset. Request access on the dataset page, accept its terms, install the download/conversion dependencies, and authenticate with the same Hugging Face account:
+
 ```bash
-# General: any image folder -> per-resolution zip (upstream tool)
-python dataset_tool.py --source=./data/pokemon --dest=./data/pokemon128.zip \
-  --resolution=128x128 --transform=center-crop
+pip install -U huggingface_hub pyarrow pillow tqdm
+hf auth login
 
-# ImageNet-100 256^2 reference zip (for FID), from the val set
-python build_imagenet100_256_zip.py
+# Download Hugging Face's Parquet conversion of the gated dataset.
+hf download ILSVRC/imagenet-1k \
+  --repo-type dataset --revision refs/convert/parquet \
+  --local-dir data_staging_imagenet1k
 
-# Helper converters: parquet -> zip / HuggingFace CIFAR-10 -> images
-python parquet_to_stylegan_zip.py
-python export_cifar10_hf.py
+# Inspect the downloaded split paths; use them in --parquet_glob below.
+find data_staging_imagenet1k -name '*.parquet' | head
+```
+
+`parquet_to_stylegan_zip.py --imagenet100` retains this project's fixed 100 original ImageNet-1k label IDs. Labels stay in the original `0..999` space so the datasets remain compatible with the official 1000-class stems and must be trained with `--label_dim=1000`.
+
+Build the 128² training ZIP from the Hugging Face `train` split, then derive the lower-resolution progressive-growing datasets from that ZIP:
+
+```bash
+python parquet_to_stylegan_zip.py \
+  --parquet_glob 'data_staging_imagenet1k/**/train/*.parquet' \
+  --dest data/imagenet100_128.zip --resolution 128 --imagenet100
+
+for res in 16 32 64; do
+  python dataset_tool.py --source data/imagenet100_128.zip \
+    --dest data/imagenet100_${res}.zip --resolution=${res}x${res}
+done
+```
+
+Build the 256² validation ZIP from the matching Hugging Face `validation` split:
+
+```bash
+python parquet_to_stylegan_zip.py \
+  --parquet_glob 'data_staging_imagenet1k/**/validation/*.parquet' \
+  --dest data/imagenet100_256.zip --resolution 256 --imagenet100
+```
+
+If ImageNet validation images are already extracted as `val/<synset>/*.JPEG` with all 1,000 synset directories, the equivalent directory-based command is:
+
+```bash
+python build_imagenet100_256_zip.py \
+  --val-root /path/to/ILSVRC/Data/CLS-LOC/val \
+  --reference-zip data/imagenet100_128.zip \
+  --dest data/imagenet100_256.zip
+```
+
+Important: the repository's `imagenet100_256.zip` reproduces the original experiment convention—approximately 50 validation images for each of the 100 classes—not a 129,597-image 256² training set. Keep the train/validation split choice consistent when comparing reported results.
+
+#### Pokémon
+
+Follow the [official StyleGAN-XL data preparation instructions](https://github.com/autonomousvision/stylegan_xl#data-preparation): download the few-shot datasets supplied by the [FastGAN authors](https://drive.google.com/file/d/1aAJCZbXNHyraJ6Mi13dSbe7pTyfPXha0/view), extract the Pokémon images to `data/pokemon/`, and create a separate ZIP for every progressive-growing resolution:
+
+```bash
+for res in 16 32 64 128; do
+  python dataset_tool.py --source data/pokemon \
+    --dest data/pokemon${res}.zip \
+    --resolution=${res}x${res} --transform=center-crop
+done
+```
+
+Pokémon is unconditional, so its generated `dataset.json` has no class labels; do not pass `--cond=1` for those runs.
+
+#### CIFAR-10
+
+Download the official Python archive and pass it directly to the upstream `dataset_tool.py`. The converter reads the five training batches (50,000 images) and writes their ten class labels to `dataset.json`:
+
+```bash
+mkdir -p data/raw
+wget -O data/raw/cifar-10-python.tar.gz \
+  https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+
+python dataset_tool.py --source data/raw/cifar-10-python.tar.gz \
+  --dest data/cifar10_32.zip
+python dataset_tool.py --source data/cifar10_32.zip \
+  --dest data/cifar10_16.zip --resolution=16x16
+```
+
+CIFAR-10 is conditional; use `--cond=1 --label_dim=10` when training it.
+
+#### Official ImageNet stems
+
+Download the pretrained stems published in the [official StyleGAN-XL model table](https://github.com/autonomousvision/stylegan_xl#pretrained-models):
+
+```bash
+mkdir -p pretrained
+for res in 16 32 64 128; do
+  wget -O pretrained/imagenet${res}.pkl \
+    https://s3.eu-central-1.amazonaws.com/avg-projects/stylegan_xl/models/imagenet${res}.pkl
+done
 ```
 
 ---
@@ -251,7 +337,7 @@ analyze_*.py / compare_*.py    layer drift analysis
 ablation_study.py              complete-stem ablation, images, and metrics
 saliency_dogs.py                saliency diagnostics
 summarize_*.py / two_tables.py result-table generation
-build_imagenet100_256_zip.py   data preparation
+parquet_to_stylegan_zip.py / build_imagenet100_256_zip.py  ImageNet-100 data preparation
 data/ pretrained/ training-runs/   input zips / stem pkls / output
 dnnlib/ torch_utils/ pg_modules/ metrics/ training/   upstream StyleGAN-XL core (mostly unchanged)
 ```
