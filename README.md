@@ -2,7 +2,7 @@
 
 > During StyleGAN-XL super-resolution training, **does softly unfreezing part of the stem beat the paper's head-only freezing?** And if it helps, is the gain because *the head simply trains more*, or because the *stem–head interface re-aligns (co-adaptation)*? This project investigates both.
 
-A fork of [StyleGAN-XL](https://github.com/autonomousvision/stylegan_xl) (Sauer et al., SIGGRAPH'22). We implement five **freeze policies** for the super-res stage and go beyond plain FID/KID by diagnosing *where* any improvement comes from, using **layer drift / counterfactual feature injection / LPIPS / saliency** analyses.
+A fork of [StyleGAN-XL](https://github.com/autonomousvision/stylegan_xl) (Sauer et al., SIGGRAPH'22). We implement five **freeze policies** for the super-res stage and go beyond plain FID/KID with three diagnostics: **layer drift / saliency / complete-stem ablation**.
 
 For the original StyleGAN-XL usage (sample generation, inversion, StyleMC, etc.), see the [upstream repository](https://github.com/autonomousvision/stylegan_xl).
 
@@ -18,7 +18,7 @@ We question that assumption:
 - **(Q2)** If so, is the gain merely from "training the stem more," or from the **stem–head boundary co-adapting** to each other?
 - **(Q3)** How does the effect differ when the stem is **underfit** (low-resource, from-scratch) vs **converged** (the paper's ~87M-kimg pkl)?
 
-Writing `G(z,c) = H(S(z,c))` (S = stem, H = head): the baseline trains `H_b(S_0)` while a variant trains `H_v(S_v)`. A plain baseline↔variant comparison changes both the stem (`S_0→S_v`) and the head (`H_b→H_v`) at once, so the cause is confounded. We therefore use **counterfactual injection** `H_v(S_0)` — keep the variant head fixed and swap the stem feature back to the original — to isolate the contribution of the stem change.
+Writing `G(z,c) = H(S(z,c))` (S = stem, H = head): the baseline trains `H_b(S_0)` while a variant trains `H_v(S_v)`. A plain baseline↔variant comparison changes both the stem (`S_0→S_v`) and the head (`H_b→H_v`) at once, so the cause is confounded. We therefore use the **complete-stem ablation study** `H_v(S_0)` — keep the variant head fixed while replacing its mapping and entire stem with the baseline counterparts — to isolate the contribution of the stem change.
 
 ### Freeze policies (variants)
 
@@ -215,25 +215,31 @@ python saliency_dogs.py layers --device cuda \
 
 The commands compare `baseline`, `a`, `a2`, `a3`, `c`, `d_cosine`, and `d_linear`. Outputs are written to `featuremaps/saliency_*.png`. The `objbg` mode additionally requires `torchvision` and may download pretrained DeepLabV3 weights on its first run.
 
-### (c) Counterfactual feature injection — *was the stem change actually needed*
-Keep the variant head, but replace only the stem feature with the baseline's → build `H_v(S_0)` and compare against `H_v(S_v)` / baseline. A large quality drop is evidence the gain came from **stem–head co-adaptation**.
-```bash
-# FID/KID (counterfactual G built by swapping in the baseline stem)
-python counterfactual_metrics_sr128.py    # sr128 variants a, c
-python counterfactual_metrics_all.py      # all available baseline+variant pairs
-python counterfactual_metrics_sr256.py    # sr256
-python counterfactual_metrics_pokemon.py  # pokemon128 Variant B
-#   -> counterfactual_runs/<label>/metric-*.jsonl
+### (c) Complete-stem ablation study — *was the stem change actually needed*
 
-# Qualitative images (normal vs counterfactual at the same latent)
-python counterfactual_sr128.py            # -> counterfactual_sr128_*_sNN.png
+Keep the variant head, but replace its mapping, synthesis input, and every stem layer with the baseline counterparts. This constructs `H_v(S_0)` and compares it against both `H_v(S_v)` and `H_b(S_0)`. A large quality drop is evidence that the variant head co-adapted to its changed stem.
+
+`ablation_study.py` performs the entire study in one run: it builds the ablated generator, saves `baseline / variant / ablation / difference` images, computes the requested metrics, and writes a JSON summary.
+
+```bash
+# One experiment: save images and compute FID
+python ablation_study.py sr128_conv_a3
+
+# Multiple metrics and selected qualitative-image seeds
+python ablation_study.py sr128_conv_a3 \
+  --metrics fid50k_full,kid50k_full --seeds 0,1,2
+
+# Run every available preset; missing snapshots are reported and skipped
+python ablation_study.py all --metrics fid50k_full
 ```
+
+Each experiment writes `comparison.png`, `metric-*.jsonl`, and `ablation_summary.json` under `ablation_study_runs/<experiment>/`. Use `--force` to recompute an existing metric.
 
 | Output | Contents |
 |---|---|
 | `analysis_results.json`, `pokemon_drift_results.json` | raw layer drift / ΔW spectrum data |
-| `featuremaps/saliency_*.png`, `counterfactual_sr128_*.png` | saliency / qualitative comparison images |
-| `counterfactual_runs/*/metric-*.jsonl` | counterfactual FID/KID |
+| `featuremaps/saliency_*.png` | saliency comparison images |
+| `ablation_study_runs/*` | complete-stem ablation images, metrics, and summaries |
 
 ---
 
@@ -242,8 +248,8 @@ python counterfactual_sr128.py            # -> counterfactual_sr128_*_sNN.png
 ```
 train.py                       super-res freeze-variant flags added (A/B/C/D)
 analyze_*.py / compare_*.py    layer drift analysis
-counterfactual_*.py            counterfactual feature injection (stem swap / hook)
-lpips_*.py / saliency_dogs.py   LPIPS / saliency diagnostics
+ablation_study.py              complete-stem ablation, images, and metrics
+saliency_dogs.py                saliency diagnostics
 summarize_*.py / two_tables.py result-table generation
 build_imagenet100_256_zip.py   data preparation
 data/ pretrained/ training-runs/   input zips / stem pkls / output
