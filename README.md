@@ -2,7 +2,7 @@
 
 > During StyleGAN-XL super-resolution training, **does softly unfreezing part of the stem beat the paper's head-only freezing?** And if it helps, is the gain because *the head simply trains more*, or because the *stem–head interface re-aligns (co-adaptation)*? This project investigates both.
 
-A fork of [StyleGAN-XL](https://github.com/autonomousvision/stylegan_xl) (Sauer et al., SIGGRAPH'22). We implement five **freeze policies** for the super-res stage and go beyond plain FID/KID by diagnosing *where* any improvement comes from, using **layer drift / counterfactual feature injection / LPIPS / feature-map** analyses.
+A fork of [StyleGAN-XL](https://github.com/autonomousvision/stylegan_xl) (Sauer et al., SIGGRAPH'22). We implement five **freeze policies** for the super-res stage and go beyond plain FID/KID by diagnosing *where* any improvement comes from, using **layer drift / counterfactual feature injection / LPIPS / saliency** analyses.
 
 For the original StyleGAN-XL usage (sample generation, inversion, StyleMC, etc.), see the [upstream repository](https://github.com/autonomousvision/stylegan_xl).
 
@@ -169,7 +169,7 @@ python calc_metrics.py --metrics=fid50k_full,kid50k_full \
 
 ---
 
-## 4. Analysis
+## 4. Analysis — "our way"
 
 Diagnostics run on the trained snapshot pkls. **Most take no arguments and run from the repo root**; the run paths to analyze are hardcoded near the top of each script (`RUNS` / `RUN_MAP` / `RUN_*`), so check/edit them to match your run names once.
 
@@ -186,13 +186,34 @@ python two_tables.py
 ```
 Example writeup: [drift_underfit_vs_converged.md](drift_underfit_vs_converged.md) (e.g. converged stems drift ~4–5× less on average than underfit ones).
 
-### (b) Feature-map visualization — *what changed at each layer*
-For a fixed (z, class), capture each synthesis layer's output (channel mean) via forward hooks and lay baseline vs variant side by side.
+### (b) Saliency analysis — *where each layer contributes to the generated image*
+
+For the same latent `z` and class condition `c`, register forward hooks on the synthesis layers and differentiate the generated-image energy `||G(z,c)||²`. The resulting gradient-weighted activation maps are normalized and resized to the output resolution, making it possible to compare where the baseline and each freeze-policy variant rely on individual layers.
+
+All saliency analyses are consolidated in `saliency_dogs.py`. Choose one of five modes:
+
+- `image`: aggregate saliency over all layers and overlay it on each generated image.
+- `layers`: compare the L9–L26 saliency maps layer by layer.
+- `diff`: visualize the absolute per-layer saliency difference from the baseline.
+- `average`: average per-layer saliency over nine dog classes and multiple seeds.
+- `objbg`: use DeepLabV3 dog masks to measure object-versus-background saliency and object enrichment.
+
 ```bash
-python feature_map_sr128.py          # baseline vs a3 -> feature_maps_sr128.png
-python feature_map_all_stages.py     # every super-res stage -> feature_maps_<stage>.png
-python feature_map_sr128_samples.py  # 10 samples x 6 variants -> feature_maps_sr128_*_sNN.png
+# Single-sample comparisons (default: class 209, seed 1, CPU)
+python saliency_dogs.py image
+python saliency_dogs.py layers --class-idx 209 --seed 1 --min-layer 9
+python saliency_dogs.py diff   --class-idx 209 --seed 1 --min-layer 9
+
+# Multi-class/multi-seed analyses: 9 dog classes x 2 seeds
+python saliency_dogs.py average --num-seeds 2 --min-layer 9
+python saliency_dogs.py objbg  --num-seeds 2 --min-layer 9
+
+# Optional: select a device or override input/output locations
+python saliency_dogs.py layers --device cuda \
+  --runs-dir training-runs --output-dir featuremaps
 ```
+
+The commands compare `baseline`, `a`, `a2`, `a3`, `c`, `d_cosine`, and `d_linear`. Outputs are written to `featuremaps/saliency_*.png`. The `objbg` mode additionally requires `torchvision` and may download pretrained DeepLabV3 weights on its first run.
 
 ### (c) Counterfactual feature injection — *was the stem change actually needed*
 Keep the variant head, but replace only the stem feature with the baseline's → build `H_v(S_0)` and compare against `H_v(S_v)` / baseline. A large quality drop is evidence the gain came from **stem–head co-adaptation**.
@@ -211,7 +232,7 @@ python counterfactual_sr128.py            # -> counterfactual_sr128_*_sNN.png
 | Output | Contents |
 |---|---|
 | `analysis_results.json`, `pokemon_drift_results.json` | raw layer drift / ΔW spectrum data |
-| `feature_maps_*.png`, `counterfactual_sr128_*.png` | feature-map / qualitative comparison images |
+| `featuremaps/saliency_*.png`, `counterfactual_sr128_*.png` | saliency / qualitative comparison images |
 | `counterfactual_runs/*/metric-*.jsonl` | counterfactual FID/KID |
 
 ---
@@ -222,7 +243,7 @@ python counterfactual_sr128.py            # -> counterfactual_sr128_*_sNN.png
 train.py                       super-res freeze-variant flags added (A/B/C/D)
 analyze_*.py / compare_*.py    layer drift analysis
 counterfactual_*.py            counterfactual feature injection (stem swap / hook)
-lpips_*.py / feature_map_*.py  LPIPS / feature-map diagnostics
+lpips_*.py / saliency_dogs.py   LPIPS / saliency diagnostics
 summarize_*.py / two_tables.py result-table generation
 build_imagenet100_256_zip.py   data preparation
 data/ pretrained/ training-runs/   input zips / stem pkls / output
